@@ -231,9 +231,11 @@ const App: React.FC = () => {
             ) : (
               <button
                 onClick={() => setShowLoginModal(true)}
-                className="flex items-center gap-2 px-4 py-2 text-pink-500 hover:bg-pink-50 rounded-lg transition-all text-sm font-semibold"
+                className="flex items-center justify-center w-10 h-10 text-pink-500 hover:bg-pink-50 rounded-lg transition-all"
+                aria-label="Owner login"
+                title="Owner login"
               >
-                <LogIn className="w-4 h-4" /> Owner Login
+                <LogIn className="w-5 h-5" />
               </button>
             )}
           </div>
