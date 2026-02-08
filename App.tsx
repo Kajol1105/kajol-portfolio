@@ -1,20 +1,23 @@
 
 import React, { useState, useEffect } from 'react';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { Lock, Plus, LogOut, User, Mail, Linkedin, Instagram, GraduationCap, Trash2, Edit2, Upload, FileText, Video, ImageIcon, LogIn, ShieldCheck } from 'lucide-react';
 import SakuraBackground from './components/SakuraBackground';
 import { PortfolioData, Section, Post, MediaItem, ProfileData } from './types';
 import profilePic from './profile.jpg';
+import { db } from './firebase';
 
 const FIXED_DEGREE = 'Bachelor of Engineering in Computer Engineering';
 const DEFAULT_BIO = 'I am a Computer Engineering student with a passion for building clean, user-friendly digital experiences.';
 const DEFAULT_COLLEGE = 'SCOE';
+const PORTFOLIO_DOC_ID = 'portfoliokajol';
 
 const INITIAL_DATA: PortfolioData = {
   profile: {
-    name: 'Sakura Enthusiast',
-    email: 'hello@example.com',
+    name: 'Kajol Tarate',
+    email: 'kajolrt11@gmail.com',
     linkedin: 'linkedin.com/in/kajol-tarate-1911dtaz',
-    instagram: 'instagram.com/username',
+    instagram: 'instagram.com/kajoltarate11',
     degreeDetails: FIXED_DEGREE,
     profilePicture: profilePic,
     bio: DEFAULT_BIO,
@@ -50,36 +53,62 @@ const App: React.FC = () => {
   const [newPostContent, setNewPostContent] = useState('');
   const [newPostMedia, setNewPostMedia] = useState<MediaItem[]>([]);
 
+  const normalizePortfolio = (data: PortfolioData): PortfolioData => ({
+    ...data,
+    profile: {
+      ...data.profile,
+      profilePicture: profilePic,
+      degreeDetails: FIXED_DEGREE,
+      bio: data.profile.bio ?? DEFAULT_BIO,
+      college: data.profile.college ?? DEFAULT_COLLEGE,
+    },
+  });
+
   useEffect(() => {
-    const saved = localStorage.getItem('sakura_portfolio_v1');
-    if (saved) {
-      const parsed = JSON.parse(saved) as PortfolioData;
-      setPortfolio({
-        ...parsed,
-        profile: {
-          ...parsed.profile,
-          profilePicture: profilePic,
-          degreeDetails: FIXED_DEGREE,
-          bio: parsed.profile.bio ?? DEFAULT_BIO,
-          college: parsed.profile.college ?? DEFAULT_COLLEGE,
-        },
-      });
-    }
+    let isMounted = true;
+
+    const loadPortfolio = async () => {
+      try {
+        const ref = doc(db, 'portfolios', PORTFOLIO_DOC_ID);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          const payload = snap.data()?.data as PortfolioData | undefined;
+          if (payload) {
+            const normalized = normalizePortfolio(payload);
+            if (isMounted) {
+              setPortfolio(normalized);
+              localStorage.setItem('sakura_portfolio_v1', JSON.stringify(normalized));
+            }
+            return;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load portfolio from Firestore:', err);
+      }
+      if (isMounted) {
+        setPortfolio(normalizePortfolio(INITIAL_DATA));
+      }
+    };
+
+    loadPortfolio();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  const saveToLocal = (data: PortfolioData) => {
-    const normalized = {
-      ...data,
-      profile: {
-        ...data.profile,
-        profilePicture: profilePic,
-        degreeDetails: FIXED_DEGREE,
-        bio: data.profile.bio ?? DEFAULT_BIO,
-        college: data.profile.college ?? DEFAULT_COLLEGE,
-      },
-    };
+  const savePortfolio = (data: PortfolioData) => {
+    const normalized = normalizePortfolio(data);
     setPortfolio(normalized);
-    localStorage.setItem('sakura_portfolio_v1', JSON.stringify(normalized));
+
+    const ref = doc(db, 'portfolios', PORTFOLIO_DOC_ID);
+    void setDoc(
+      ref,
+      { data: normalized, updatedAt: serverTimestamp() },
+      { merge: true }
+    ).catch((err) => {
+      console.error('Failed to save portfolio to Firestore:', err);
+    });
   };
 
   const handleLogin = (e: React.FormEvent) => {
@@ -102,13 +131,11 @@ const App: React.FC = () => {
       email: formData.get('email') as string,
       linkedin: formData.get('linkedin') as string,
       instagram: formData.get('instagram') as string,
-      sscPercentage: '',
-      hscPercentage: '',
       degreeDetails: formData.get('degree') as string,
       bio: formData.get('bio') as string,
       college: formData.get('college') as string,
     };
-    saveToLocal({ ...portfolio, profile: updatedProfile });
+    savePortfolio({ ...portfolio, profile: updatedProfile });
     setIsEditingProfile(false);
   };
 
@@ -119,14 +146,14 @@ const App: React.FC = () => {
       title: newSectionTitle,
       posts: [],
     };
-    saveToLocal({ ...portfolio, sections: [...portfolio.sections, newSection] });
+    savePortfolio({ ...portfolio, sections: [...portfolio.sections, newSection] });
     setNewSectionTitle('');
     setShowSectionModal(false);
   };
 
   const deleteSection = (id: string) => {
     if (!confirm("Are you sure you want to delete this section?")) return;
-    saveToLocal({ ...portfolio, sections: portfolio.sections.filter(s => s.id !== id) });
+    savePortfolio({ ...portfolio, sections: portfolio.sections.filter(s => s.id !== id) });
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -168,7 +195,7 @@ const App: React.FC = () => {
       return s;
     });
 
-    saveToLocal({ ...portfolio, sections: updatedSections });
+    savePortfolio({ ...portfolio, sections: updatedSections });
     setNewPostContent('');
     setNewPostMedia([]);
     setActivePostModal(null);
@@ -182,7 +209,7 @@ const App: React.FC = () => {
       }
       return s;
     });
-    saveToLocal({ ...portfolio, sections: updatedSections });
+    savePortfolio({ ...portfolio, sections: updatedSections });
   };
 
   const deleteAllPostsInSection = (sectionId: string) => {
@@ -193,7 +220,7 @@ const App: React.FC = () => {
       }
       return s;
     });
-    saveToLocal({ ...portfolio, sections: updatedSections });
+    savePortfolio({ ...portfolio, sections: updatedSections });
   };
 
   return (
