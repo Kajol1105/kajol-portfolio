@@ -1,12 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Lock, Plus, LogOut, User, Mail, Linkedin, Instagram, GraduationCap, Trash2, Edit2, Upload, FileText, Video, ImageIcon, LogIn, ShieldCheck } from 'lucide-react';
 import SakuraBackground from './components/SakuraBackground';
 import { PortfolioData, Section, Post, MediaItem, ProfileData } from './types';
 import profilePic from './profile.jpg';
-import { db, storage } from './firebase';
+import { db } from './firebase';
 
 const FIXED_DEGREE = 'Bachelor of Engineering in Computer Engineering';
 const DEFAULT_BIO = 'I am a Computer Engineering student with a passion for building clean, user-friendly digital experiences.';
@@ -26,14 +25,28 @@ const INITIAL_DATA: PortfolioData = {
   },
   sections: [
     {
-      id: 'default-1',
-      title: 'Certificates',
-      posts: [],
-    },
-    {
       id: 'default-2',
       title: 'Skills',
-      posts: [],
+      posts: [
+        {
+          id: 'skill-1',
+          content: 'Japanese',
+          media: [],
+          timestamp: Date.now(),
+        },
+        {
+          id: 'skill-2',
+          content: 'Technical writing',
+          media: [],
+          timestamp: Date.now(),
+        },
+        {
+          id: 'skill-3',
+          content: 'MERN stack',
+          media: [],
+          timestamp: Date.now(),
+        }
+      ],
     }
   ]
 };
@@ -53,7 +66,8 @@ const App: React.FC = () => {
   // Post creation state
   const [newPostContent, setNewPostContent] = useState('');
   const [newPostMedia, setNewPostMedia] = useState<MediaItem[]>([]);
-  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+  const [newMediaUrl, setNewMediaUrl] = useState('');
+  const [newMediaType, setNewMediaType] = useState<'image' | 'video' | 'pdf'>('image');
 
   const normalizePortfolio = (data: PortfolioData): PortfolioData => ({
     ...data,
@@ -158,42 +172,19 @@ const App: React.FC = () => {
     savePortfolio({ ...portfolio, sections: portfolio.sections.filter(s => s.id !== id) });
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const handleAddMediaLink = () => {
+    const trimmed = newMediaUrl.trim();
+    if (!trimmed) return;
 
-    setIsUploadingMedia(true);
-    const uploads = Array.from(files).map(async (file: File) => {
-      let type: 'image' | 'video' | 'pdf' = 'image';
-      if (file.type.includes('video')) type = 'video';
-      if (file.type.includes('pdf')) type = 'pdf';
-
-      const id = Math.random().toString(36).substr(2, 9);
-      const safeName = file.name.replace(/\s+/g, '_');
-      const path = `media/${PORTFOLIO_DOC_ID}/${Date.now()}-${id}-${safeName}`;
-      const fileRef = storageRef(storage, path);
-      await uploadBytes(fileRef, file);
-      const url = await getDownloadURL(fileRef);
-
-      const newItem: MediaItem = {
-        id,
-        type,
-        url,
-        name: file.name,
-      };
-      return newItem;
-    });
-
-    try {
-      const uploaded = await Promise.all(uploads);
-      setNewPostMedia((prev) => [...prev, ...uploaded]);
-    } catch (err) {
-      console.error('Failed to upload media', err);
-      alert('Failed to upload one or more files. Please try again.');
-    } finally {
-      setIsUploadingMedia(false);
-      e.target.value = '';
-    }
+    const name = trimmed.split('/').pop() || 'media';
+    const newItem: MediaItem = {
+      id: Math.random().toString(36).substr(2, 9),
+      type: newMediaType,
+      url: trimmed,
+      name,
+    };
+    setNewPostMedia((prev) => [...prev, newItem]);
+    setNewMediaUrl('');
   };
 
   const createPost = (sectionId: string) => {
@@ -586,11 +577,36 @@ const App: React.FC = () => {
                     </button>
                   </div>
                 ))}
-                <label className="aspect-square flex flex-col items-center justify-center border-2 border-dashed border-pink-100 rounded-lg hover:bg-pink-50 cursor-pointer transition-colors text-pink-300">
+                <div className="aspect-square flex flex-col items-center justify-center border-2 border-dashed border-pink-100 rounded-lg text-pink-300">
                   <Plus className="w-6 h-6 mb-1" />
-                  <span className="text-[10px] font-semibold uppercase">Add Media</span>
-                  <input type="file" multiple className="hidden" accept="image/*,video/*,.pdf" onChange={handleFileUpload} />
-                </label>
+                  <span className="text-[10px] font-semibold uppercase text-center px-2">Add Link</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                <input
+                  type="url"
+                  placeholder="Paste image / video / PDF link"
+                  className="md:col-span-3 w-full px-4 py-2 border border-pink-100 rounded-xl outline-none focus:ring-2 focus:ring-pink-200"
+                  value={newMediaUrl}
+                  onChange={(e) => setNewMediaUrl(e.target.value)}
+                />
+                <select
+                  className="md:col-span-1 w-full px-3 py-2 border border-pink-100 rounded-xl bg-white outline-none focus:ring-2 focus:ring-pink-200"
+                  value={newMediaType}
+                  onChange={(e) => setNewMediaType(e.target.value as 'image' | 'video' | 'pdf')}
+                >
+                  <option value="image">Image</option>
+                  <option value="video">Video</option>
+                  <option value="pdf">PDF</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={handleAddMediaLink}
+                  className="md:col-span-1 px-4 py-2 bg-pink-500 text-white rounded-xl font-semibold hover:bg-pink-600 transition-all"
+                >
+                  Add Link
+                </button>
               </div>
 
               <div className="flex items-center gap-4 text-xs text-pink-400 border-t pt-4">
@@ -603,10 +619,10 @@ const App: React.FC = () => {
             <div className="flex gap-3 mt-8">
               <button 
                 onClick={() => createPost(activePostModal!)} 
-                disabled={(!newPostContent && newPostMedia.length === 0) || isUploadingMedia}
+                disabled={!newPostContent && newPostMedia.length === 0}
                 className="flex-grow py-3 bg-pink-500 text-white font-bold rounded-xl shadow-lg shadow-pink-100 hover:bg-pink-600 transition-all disabled:opacity-50"
               >
-                {isUploadingMedia ? 'Uploading...' : 'Post Content'}
+                Post Content
               </button>
               <button onClick={() => { setActivePostModal(null); setNewPostMedia([]); setNewPostContent(''); }} className="px-6 py-3 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50">Discard</button>
             </div>
