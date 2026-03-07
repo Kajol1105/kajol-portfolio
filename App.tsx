@@ -62,12 +62,19 @@ const App: React.FC = () => {
   const [showSectionModal, setShowSectionModal] = useState(false);
   const [newSectionTitle, setNewSectionTitle] = useState('');
   const [activePostModal, setActivePostModal] = useState<string | null>(null); // sectionId
-  
-  // Post creation state
+  const [editingPost, setEditingPost] = useState<{post: Post, sectionId: string} | null>(null);
   const [newPostContent, setNewPostContent] = useState('');
   const [newPostMedia, setNewPostMedia] = useState<MediaItem[]>([]);
   const [newMediaUrl, setNewMediaUrl] = useState('');
   const [newMediaType, setNewMediaType] = useState<'image' | 'video' | 'pdf'>('image');
+
+  useEffect(() => {
+    if (editingPost) {
+      setNewPostContent(editingPost.post.content);
+      setNewPostMedia([...editingPost.post.media]);
+      setActivePostModal(editingPost.sectionId);
+    }
+  }, [editingPost]);
 
   const normalizePortfolio = (data: PortfolioData): PortfolioData => ({
     ...data,
@@ -125,6 +132,11 @@ const App: React.FC = () => {
     ).catch((err) => {
       console.error('Failed to save portfolio to Firestore:', err);
     });
+  };
+
+  const resetToDefaults = () => {
+    if (!confirm('Reset all data to defaults? This will overwrite Firestore.')) return;
+    savePortfolio(INITIAL_DATA);
   };
 
   const handleLogin = (e: React.FormEvent) => {
@@ -208,6 +220,27 @@ const App: React.FC = () => {
     setActivePostModal(null);
   };
 
+  const updatePost = (sectionId: string, postId: string) => {
+    const updatedPost: Post = {
+      ...editingPost!.post,
+      content: newPostContent,
+      media: newPostMedia,
+    };
+
+    const updatedSections = portfolio.sections.map(s => {
+      if (s.id === sectionId) {
+        return { ...s, posts: s.posts.map(p => p.id === postId ? updatedPost : p) };
+      }
+      return s;
+    });
+
+    savePortfolio({ ...portfolio, sections: updatedSections });
+    setEditingPost(null);
+    setActivePostModal(null);
+    setNewPostContent('');
+    setNewPostMedia([]);
+  };
+
   const deletePost = (sectionId: string, postId: string) => {
     if (!confirm("Delete this post?")) return;
     const updatedSections = portfolio.sections.map(s => {
@@ -253,6 +286,12 @@ const App: React.FC = () => {
                   className="hidden md:flex items-center gap-2 px-4 py-2 bg-pink-500 hover:bg-pink-600 text-white rounded-lg transition-all text-sm font-medium shadow-md"
                 >
                   <Plus className="w-4 h-4" /> Create New Section
+                </button>
+                <button
+                  onClick={resetToDefaults}
+                  className="hidden md:flex items-center gap-2 px-4 py-2 bg-white text-red-500 hover:bg-red-50 border border-red-200 rounded-lg transition-all text-sm font-medium shadow-sm"
+                >
+                  <Trash2 className="w-4 h-4" /> Reset Defaults
                 </button>
                 <button
                   onClick={() => setIsLoggedIn(false)}
@@ -361,7 +400,7 @@ const App: React.FC = () => {
               {isLoggedIn && (
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => setActivePostModal(section.id)}
+                    onClick={() => { setEditingPost(null); setActivePostModal(section.id); }}
                     className="flex items-center gap-2 px-4 py-2 bg-white text-pink-500 hover:bg-pink-50 border border-pink-200 rounded-lg transition-all font-medium shadow-sm"
                   >
                     <Plus className="w-4 h-4" /> Add Post
@@ -391,12 +430,20 @@ const App: React.FC = () => {
                 section.posts.map((post) => (
                   <div key={post.id} className="group relative bg-white/95 rounded-2xl shadow-lg border border-pink-50 overflow-hidden flex flex-col hover:scale-[1.02] transition-transform duration-300">
                     {isLoggedIn && (
-                      <button
-                        onClick={() => deletePost(section.id, post.id)}
-                        className="absolute top-2 right-2 z-10 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <>
+                        <button
+                          onClick={() => setEditingPost({post, sectionId: section.id})}
+                          className="absolute top-2 right-12 z-10 p-1.5 bg-blue-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => deletePost(section.id, post.id)}
+                          className="absolute top-2 right-2 z-10 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </>
                     )}
                     
                     {post.media.length > 0 && (
@@ -549,7 +596,7 @@ const App: React.FC = () => {
       {activePostModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           <div className="w-full max-w-2xl bg-white rounded-2xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold text-gray-800 mb-4">Add to {portfolio.sections.find(s => s.id === activePostModal)?.title}</h3>
+            <h3 className="text-xl font-bold text-gray-800 mb-4">{editingPost ? 'Edit Post' : `Add to ${portfolio.sections.find(s => s.id === activePostModal)?.title}`}</h3>
             
             <div className="space-y-4">
               <textarea
@@ -618,13 +665,13 @@ const App: React.FC = () => {
 
             <div className="flex gap-3 mt-8">
               <button 
-                onClick={() => createPost(activePostModal!)} 
+                onClick={() => editingPost ? updatePost(editingPost.sectionId, editingPost.post.id) : createPost(activePostModal!)} 
                 disabled={!newPostContent && newPostMedia.length === 0}
                 className="flex-grow py-3 bg-pink-500 text-white font-bold rounded-xl shadow-lg shadow-pink-100 hover:bg-pink-600 transition-all disabled:opacity-50"
               >
-                Post Content
+                {editingPost ? 'Update Post' : 'Post Content'}
               </button>
-              <button onClick={() => { setActivePostModal(null); setNewPostMedia([]); setNewPostContent(''); }} className="px-6 py-3 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50">Discard</button>
+              <button onClick={() => { setActivePostModal(null); setEditingPost(null); setNewPostMedia([]); setNewPostContent(''); }} className="px-6 py-3 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50">Discard</button>
             </div>
           </div>
         </div>
