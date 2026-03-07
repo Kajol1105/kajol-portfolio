@@ -2,16 +2,18 @@
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { Lock, Plus, LogOut, User, Mail, Linkedin, Instagram, GraduationCap, Trash2, Edit2, Upload, FileText, Video, ImageIcon, LogIn, ShieldCheck } from 'lucide-react';
+import { Lock, Plus, LogOut, User, Mail, Linkedin, Instagram, GraduationCap, Trash2, Edit2, Upload, FileText, Video, ImageIcon, LogIn, ShieldCheck, GripVertical, X } from 'lucide-react';
 import SakuraBackground from './components/SakuraBackground';
 import { PortfolioData, Section, Post, MediaItem, ProfileData } from './types';
 import profilePic from './profile.jpg';
+import resumePdf from './resume1.pdf';
 import { db, storage } from './firebase';
 
 const FIXED_DEGREE = 'Bachelor of Engineering in Computer Engineering';
 const DEFAULT_BIO = 'I am a Computer Engineering student with a passion for building clean, user-friendly digital experiences.';
 const DEFAULT_COLLEGE = 'SCOE';
 const PORTFOLIO_DOC_ID = 'portfoliokajol';
+const RESUME_SECTION_TITLE = 'Resume';
 
 const INITIAL_DATA: PortfolioData = {
   profile: {
@@ -54,6 +56,52 @@ const INITIAL_DATA: PortfolioData = {
 
 const SECRET_CODE = "DAZAI4teru";
 
+const ensureResumeSection = (sections: Section[]): Section[] => {
+  const resumeMedia: MediaItem = {
+    id: 'resume-media-1',
+    type: 'pdf',
+    url: resumePdf,
+    name: 'resume1.pdf',
+  };
+
+  const resumePost: Post = {
+    id: 'resume-post-1',
+    content: 'resume1.pdf',
+    media: [resumeMedia],
+    timestamp: Date.now(),
+  };
+
+  const resumeIndex = sections.findIndex(
+    (section) => section.title.trim().toLowerCase() === RESUME_SECTION_TITLE.toLowerCase()
+  );
+
+  if (resumeIndex === -1) {
+    return [
+      ...sections,
+      {
+        id: 'resume-section-1',
+        title: RESUME_SECTION_TITLE,
+        posts: [resumePost],
+      },
+    ];
+  }
+
+  const updatedSections = [...sections];
+  const existingResume = updatedSections[resumeIndex];
+  const hasResumePdf = existingResume.posts.some((post) =>
+    post.media.some((media) => media.type === 'pdf' && (media.name === 'resume1.pdf' || media.url === resumePdf))
+  );
+
+  if (!hasResumePdf) {
+    updatedSections[resumeIndex] = {
+      ...existingResume,
+      posts: [resumePost, ...existingResume.posts],
+    };
+  }
+
+  return updatedSections;
+};
+
 const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -61,6 +109,8 @@ const App: React.FC = () => {
   const [portfolio, setPortfolio] = useState<PortfolioData>(INITIAL_DATA);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [showSectionModal, setShowSectionModal] = useState(false);
+  const [showReorderModal, setShowReorderModal] = useState(false);
+  const [draggingSectionId, setDraggingSectionId] = useState<string | null>(null);
   const [newSectionTitle, setNewSectionTitle] = useState('');
   const [activePostModal, setActivePostModal] = useState<string | null>(null); // sectionId
   const [editingPost, setEditingPost] = useState<{post: Post, sectionId: string} | null>(null);
@@ -68,6 +118,7 @@ const App: React.FC = () => {
   const [newPostMedia, setNewPostMedia] = useState<MediaItem[]>([]);
   const [newMediaUrl, setNewMediaUrl] = useState('');
   const [newMediaType, setNewMediaType] = useState<'image' | 'video' | 'pdf'>('image');
+  const [expandedPost, setExpandedPost] = useState<{ post: Post; sectionTitle: string } | null>(null);
 
   useEffect(() => {
     if (editingPost) {
@@ -79,6 +130,7 @@ const App: React.FC = () => {
 
   const normalizePortfolio = (data: PortfolioData): PortfolioData => ({
     ...data,
+    sections: ensureResumeSection(data.sections),
     profile: {
       ...data.profile,
       profilePicture: profilePic,
@@ -183,6 +235,20 @@ const App: React.FC = () => {
   const deleteSection = (id: string) => {
     if (!confirm("Are you sure you want to delete this section?")) return;
     savePortfolio({ ...portfolio, sections: portfolio.sections.filter(s => s.id !== id) });
+  };
+
+  const reorderSections = (draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return;
+
+    const fromIndex = portfolio.sections.findIndex((section) => section.id === draggedId);
+    const toIndex = portfolio.sections.findIndex((section) => section.id === targetId);
+    if (fromIndex === -1 || toIndex === -1) return;
+
+    const updatedSections = [...portfolio.sections];
+    const [movedSection] = updatedSections.splice(fromIndex, 1);
+    updatedSections.splice(toIndex, 0, movedSection);
+
+    savePortfolio({ ...portfolio, sections: updatedSections });
   };
 
   const handleAddMediaLink = () => {
@@ -303,6 +369,12 @@ const App: React.FC = () => {
                   className="hidden md:flex items-center gap-2 px-4 py-2 bg-white text-red-500 hover:bg-red-50 border border-red-200 rounded-lg transition-all text-sm font-medium shadow-sm"
                 >
                   <Trash2 className="w-4 h-4" /> Reset Defaults
+                </button>
+                <button
+                  onClick={() => setShowReorderModal(true)}
+                  className="hidden md:flex items-center gap-2 px-4 py-2 bg-white text-pink-500 hover:bg-pink-50 border border-pink-200 rounded-lg transition-all text-sm font-medium shadow-sm"
+                >
+                  <GripVertical className="w-4 h-4" /> Rearrange Sections
                 </button>
                 <button
                   onClick={() => setIsLoggedIn(false)}
@@ -432,66 +504,104 @@ const App: React.FC = () => {
               )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-x-auto pb-4 scrollbar-thin">
-              {section.posts.length === 0 ? (
-                <div className="col-span-full py-12 text-center bg-pink-50/50 rounded-2xl border-2 border-dashed border-pink-100">
-                  <p className="text-pink-300 italic">No posts here yet.</p>
-                </div>
-              ) : (
-                section.posts.map((post) => (
-                  <div key={post.id} className="group relative bg-white/95 rounded-2xl shadow-lg border border-pink-50 overflow-hidden flex flex-col hover:scale-[1.02] transition-transform duration-300">
-                    {isLoggedIn && (
-                      <>
-                        <button
-                          onClick={() => setEditingPost({post, sectionId: section.id})}
-                          className="absolute top-2 right-12 z-10 p-1.5 bg-blue-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => deletePost(section.id, post.id)}
-                          className="absolute top-2 right-2 z-10 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </>
-                    )}
-                    
-                    {post.media.length > 0 && (
-                      <div className="relative aspect-video bg-gray-100 overflow-hidden">
-                        {post.media[0].type === 'image' && (
-                          <img src={post.media[0].url} alt="Media" className="w-full h-full object-cover" />
-                        )}
-                        {post.media[0].type === 'video' && (
-                          <video src={post.media[0].url} className="w-full h-full object-cover" controls />
-                        )}
-                        {post.media[0].type === 'pdf' && (
-                          <div className="flex flex-col items-center justify-center h-full text-pink-400">
-                            <FileText className="w-12 h-12" />
-                            <span className="text-xs mt-2 px-2 text-center truncate w-full">{post.media[0].name}</span>
-                          </div>
-                        )}
-                        {post.media.length > 1 && (
-                          <div className="absolute bottom-2 right-2 px-2 py-1 bg-black/50 text-white text-[10px] rounded-md backdrop-blur-sm">
-                            +{post.media.length - 1} more
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="p-4 flex-grow">
-                      <p className="text-gray-700 text-sm whitespace-pre-wrap line-clamp-4 leading-relaxed">
-                        {post.content}
-                      </p>
-                    </div>
-                    
-                    <div className="px-4 py-2 bg-pink-50/50 text-[10px] text-pink-300 font-semibold tracking-wider uppercase">
-                      {new Date(post.timestamp).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
-                    </div>
+            {section.title.trim().toLowerCase() === RESUME_SECTION_TITLE.toLowerCase() ? (
+              <div className="space-y-3">
+                {section.posts.filter((post) => post.media.some((media) => media.type === 'pdf')).length === 0 ? (
+                  <div className="py-8 text-center bg-pink-50/50 rounded-2xl border-2 border-dashed border-pink-100">
+                    <p className="text-pink-300 italic">No resume uploaded yet.</p>
                   </div>
-                ))
-              )}
-            </div>
+                ) : (
+                  section.posts.map((post) => {
+                    const pdfMedia = post.media.find((media) => media.type === 'pdf');
+                    if (!pdfMedia) return null;
+
+                    return (
+                      <a
+                        key={post.id}
+                        href={pdfMedia.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 w-fit px-4 py-3 bg-white text-pink-600 hover:bg-pink-50 border border-pink-200 rounded-xl transition-all font-semibold shadow-sm"
+                      >
+                        <FileText className="w-4 h-4" />
+                        <span>{post.content || pdfMedia.name || 'Resume'}</span>
+                      </a>
+                    );
+                  })
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-x-auto pb-4 scrollbar-thin">
+                {section.posts.length === 0 ? (
+                  <div className="col-span-full py-12 text-center bg-pink-50/50 rounded-2xl border-2 border-dashed border-pink-100">
+                    <p className="text-pink-300 italic">No posts here yet.</p>
+                  </div>
+                ) : (
+                  section.posts.map((post) => (
+                    <div
+                      key={post.id}
+                      onClick={() => setExpandedPost({ post, sectionTitle: section.title })}
+                      className="group relative bg-white/95 rounded-2xl shadow-lg border border-pink-50 overflow-hidden flex flex-col hover:scale-[1.02] transition-transform duration-300 cursor-pointer"
+                    >
+                      {isLoggedIn && (
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingPost({post, sectionId: section.id});
+                            }}
+                            className="absolute top-2 right-12 z-10 p-1.5 bg-blue-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deletePost(section.id, post.id);
+                            }}
+                            className="absolute top-2 right-2 z-10 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+                      
+                      {post.media.length > 0 && (
+                        <div className="relative aspect-video bg-gray-100 overflow-hidden">
+                          {post.media[0].type === 'image' && (
+                            <img src={post.media[0].url} alt="Media" className="w-full h-full object-cover" />
+                          )}
+                          {post.media[0].type === 'video' && (
+                            <video src={post.media[0].url} className="w-full h-full object-cover" controls />
+                          )}
+                          {post.media[0].type === 'pdf' && (
+                            <div className="flex flex-col items-center justify-center h-full text-pink-400">
+                              <FileText className="w-12 h-12" />
+                              <span className="text-xs mt-2 px-2 text-center truncate w-full">{post.media[0].name}</span>
+                            </div>
+                          )}
+                          {post.media.length > 1 && (
+                            <div className="absolute bottom-2 right-2 px-2 py-1 bg-black/50 text-white text-[10px] rounded-md backdrop-blur-sm">
+                              +{post.media.length - 1} more
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="p-4 flex-grow">
+                        <p className="text-gray-700 text-sm whitespace-pre-wrap line-clamp-4 leading-relaxed">
+                          {post.content}
+                        </p>
+                      </div>
+                      
+                      <div className="px-4 py-2 bg-pink-50/50 text-[10px] text-pink-300 font-semibold tracking-wider uppercase">
+                        {new Date(post.timestamp).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </section>
         ))}
       </main>
@@ -598,6 +708,53 @@ const App: React.FC = () => {
             <div className="flex gap-3">
               <button onClick={addSection} className="flex-grow py-3 bg-pink-500 text-white font-bold rounded-xl shadow-lg shadow-pink-100 hover:bg-pink-600 transition-all">Create</button>
               <button onClick={() => setShowSectionModal(false)} className="px-6 py-3 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reorder Sections Modal */}
+      {showReorderModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-white rounded-2xl p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
+            <h3 className="text-xl font-bold text-gray-800">Rearrange Sections</h3>
+            <p className="text-sm text-gray-500 mt-1 mb-4">Drag and drop items to change the section order.</p>
+            <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+              {portfolio.sections.length === 0 ? (
+                <p className="text-sm text-gray-400 py-4 text-center border border-dashed rounded-xl">No sections to rearrange.</p>
+              ) : (
+                portfolio.sections.map((section) => (
+                  <div
+                    key={section.id}
+                    draggable
+                    onDragStart={() => setDraggingSectionId(section.id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => {
+                      if (draggingSectionId) {
+                        reorderSections(draggingSectionId, section.id);
+                      }
+                      setDraggingSectionId(null);
+                    }}
+                    onDragEnd={() => setDraggingSectionId(null)}
+                    className={`flex items-center gap-3 p-3 rounded-xl border transition-colors cursor-move ${
+                      draggingSectionId === section.id
+                        ? 'bg-pink-50 border-pink-300'
+                        : 'bg-white border-pink-100 hover:bg-pink-50/50'
+                    }`}
+                  >
+                    <GripVertical className="w-4 h-4 text-pink-400" />
+                    <span className="text-sm font-medium text-gray-700">{section.title}</span>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                onClick={() => setShowReorderModal(false)}
+                className="px-6 py-2 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50"
+              >
+                Done
+              </button>
             </div>
           </div>
         </div>
@@ -720,6 +877,68 @@ const App: React.FC = () => {
                 {editingPost ? 'Update Post' : 'Post Content'}
               </button>
               <button onClick={() => { setActivePostModal(null); setEditingPost(null); setNewPostMedia([]); setNewPostContent(''); }} className="px-6 py-3 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50">Discard</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Expanded Post Modal */}
+      {expandedPost && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          onClick={() => setExpandedPost(null)}
+        >
+          <div
+            className="w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-white rounded-2xl shadow-2xl border border-pink-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 p-5 bg-white/95 backdrop-blur border-b border-pink-100">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-pink-500">{expandedPost.sectionTitle}</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {new Date(expandedPost.post.timestamp).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                </p>
+              </div>
+              <button
+                onClick={() => setExpandedPost(null)}
+                className="p-2 text-gray-400 hover:text-pink-500 hover:bg-pink-50 rounded-lg transition-all"
+                aria-label="Close expanded post"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {expandedPost.post.media.map((media) => (
+                <div key={media.id} className="rounded-xl overflow-hidden border border-pink-100 bg-pink-50/20">
+                  {media.type === 'image' && (
+                    <img src={media.url} alt={media.name || 'Post image'} className="w-full max-h-[420px] object-contain bg-white" />
+                  )}
+                  {media.type === 'video' && (
+                    <video src={media.url} className="w-full max-h-[420px] bg-black" controls />
+                  )}
+                  {media.type === 'pdf' && (
+                    <div className="p-6 flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3 text-pink-500">
+                        <FileText className="w-6 h-6" />
+                        <span className="text-sm text-gray-700 break-all">{media.name || 'PDF file'}</span>
+                      </div>
+                      <a
+                        href={media.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-2 bg-pink-500 text-white text-xs font-semibold rounded-lg hover:bg-pink-600 transition-all"
+                      >
+                        Open PDF
+                      </a>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">
+                {expandedPost.post.content}
+              </p>
             </div>
           </div>
         </div>
