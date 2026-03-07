@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { Lock, Plus, LogOut, User, Mail, Linkedin, Instagram, GraduationCap, Trash2, Edit2, Upload, FileText, Video, ImageIcon, LogIn, ShieldCheck } from 'lucide-react';
 import SakuraBackground from './components/SakuraBackground';
 import { PortfolioData, Section, Post, MediaItem, ProfileData } from './types';
 import profilePic from './profile.jpg';
-import { db } from './firebase';
+import { db, storage } from './firebase';
 
 const FIXED_DEGREE = 'Bachelor of Engineering in Computer Engineering';
 const DEFAULT_BIO = 'I am a Computer Engineering student with a passion for building clean, user-friendly digital experiences.';
@@ -261,6 +262,16 @@ const App: React.FC = () => {
       return s;
     });
     savePortfolio({ ...portfolio, sections: updatedSections });
+  };
+
+  const uploadFile = async (file: File): Promise<string> => {
+    const storageRef = ref(storage, `media/${Date.now()}_${file.name}`);
+    const uploadTask = uploadBytesResumable(storageRef, file);
+    return new Promise((resolve, reject) => {
+      uploadTask.on('state_changed', null, reject, () => {
+        getDownloadURL(uploadTask.snapshot.ref).then(resolve).catch(reject);
+      });
+    });
   };
 
   return (
@@ -656,9 +667,46 @@ const App: React.FC = () => {
                 </button>
               </div>
 
+              <div className="mt-3">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Upload File</label>
+                <input
+                  type="file"
+                  accept="image/*,video/*,.pdf"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      try {
+                        const url = await uploadFile(file);
+                        let type: 'image' | 'video' | 'pdf';
+                        if (file.type.startsWith('image/')) type = 'image';
+                        else if (file.type.startsWith('video/')) type = 'video';
+                        else if (file.type === 'application/pdf') type = 'pdf';
+                        else {
+                          alert('Unsupported file type. Please select an image, video, or PDF.');
+                          return;
+                        }
+                        const name = file.name;
+                        const newItem: MediaItem = {
+                          id: Math.random().toString(36).substr(2, 9),
+                          type,
+                          url,
+                          name,
+                        };
+                        setNewPostMedia((prev) => [...prev, newItem]);
+                        e.target.value = ''; // reset
+                      } catch (err) {
+                        console.error('Upload failed:', err);
+                        alert('Upload failed. Please try again.');
+                      }
+                    }
+                  }}
+                  className="w-full px-4 py-2 border border-pink-100 rounded-xl outline-none focus:ring-2 focus:ring-pink-200"
+                />
+              </div>
+
               <div className="flex items-center gap-4 text-xs text-pink-400 border-t pt-4">
                 <span className="flex items-center gap-1"><ImageIcon className="w-3 h-3" /> Images</span>
-                <span className="flex items-center gap-1"><Video className="w-3 h-3" /> Video</span>
+                <span className="flex items-center gap-1"><Video className="w-3 h-3" /> Videos</span>
                 <span className="flex items-center gap-1"><FileText className="w-3 h-3" /> PDFs</span>
               </div>
             </div>
