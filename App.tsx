@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import React, { useRef, useState, useEffect } from 'react';
+import { addDoc, collection, doc, getDoc, onSnapshot, orderBy, query, setDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { Lock, Plus, LogOut, User, Mail, Linkedin, Instagram, GraduationCap, Trash2, Edit2, Upload, FileText, Video, ImageIcon, LogIn, ShieldCheck, GripVertical, X } from 'lucide-react';
+import { Lock, Plus, LogOut, Mail, Linkedin, Instagram, GraduationCap, Trash2, Edit2, Upload, FileText, Video, ImageIcon, LogIn, ShieldCheck, GripVertical, X } from 'lucide-react';
 import SakuraBackground from './components/SakuraBackground';
 import { PortfolioData, Section, Post, MediaItem, ProfileData } from './types';
 import profilePic from './profile.jpg';
@@ -55,6 +55,14 @@ const INITIAL_DATA: PortfolioData = {
 };
 
 const SECRET_CODE = "DAZAI4teru";
+
+interface FeedbackItem {
+  id: string;
+  name: string;
+  email: string;
+  thoughts: string;
+  createdAt: number | null;
+}
 
 const ensureResumeSection = (sections: Section[]): Section[] => {
   const resumeMedia: MediaItem = {
@@ -114,19 +122,70 @@ const App: React.FC = () => {
   const [newSectionTitle, setNewSectionTitle] = useState('');
   const [activePostModal, setActivePostModal] = useState<string | null>(null); // sectionId
   const [editingPost, setEditingPost] = useState<{post: Post, sectionId: string} | null>(null);
+  const [newPostTitle, setNewPostTitle] = useState('');
   const [newPostContent, setNewPostContent] = useState('');
   const [newPostMedia, setNewPostMedia] = useState<MediaItem[]>([]);
   const [newMediaUrl, setNewMediaUrl] = useState('');
   const [newMediaType, setNewMediaType] = useState<'image' | 'video' | 'pdf'>('image');
   const [expandedPost, setExpandedPost] = useState<{ post: Post; sectionTitle: string } | null>(null);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+  const [showAdminFeedbackModal, setShowAdminFeedbackModal] = useState(false);
+  const [feedbackItems, setFeedbackItems] = useState<FeedbackItem[]>([]);
+  const [feedbackForm, setFeedbackForm] = useState({
+    name: '',
+    email: '',
+    thoughts: '',
+  });
+  const postTitleInputRef = useRef<HTMLInputElement>(null);
+  const postContentInputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (editingPost) {
+      setNewPostTitle(editingPost.post.title ?? '');
       setNewPostContent(editingPost.post.content);
       setNewPostMedia([...editingPost.post.media]);
       setActivePostModal(editingPost.sectionId);
     }
   }, [editingPost]);
+
+  const escapeHtml = (input: string) =>
+    input
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const getFormattedHtml = (input: string) =>
+    escapeHtml(input)
+      .replace(/__(.+?)__/g, '<u>$1</u>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/\n/g, '<br />');
+
+  const applyFormat = (target: 'title' | 'content', marker: '**' | '*' | '__') => {
+    const inputElement = target === 'title' ? postTitleInputRef.current : postContentInputRef.current;
+    const textValue = target === 'title' ? newPostTitle : newPostContent;
+    const setTextValue = target === 'title' ? setNewPostTitle : setNewPostContent;
+
+    if (!inputElement) return;
+
+    const start = inputElement.selectionStart ?? textValue.length;
+    const end = inputElement.selectionEnd ?? textValue.length;
+    const selectedText = textValue.slice(start, end);
+    const wrappedSelection = selectedText ? `${marker}${selectedText}${marker}` : `${marker}${marker}`;
+    const nextValue = textValue.slice(0, start) + wrappedSelection + textValue.slice(end);
+
+    setTextValue(nextValue);
+
+    requestAnimationFrame(() => {
+      inputElement.focus();
+      const nextCursor = start + marker.length;
+      const nextSelectionEnd = selectedText ? end + marker.length : nextCursor;
+      inputElement.setSelectionRange(nextCursor, nextSelectionEnd);
+    });
+  };
 
   const normalizePortfolio = (data: PortfolioData): PortfolioData => ({
     ...data,
@@ -172,6 +231,44 @@ const App: React.FC = () => {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setFeedbackItems([]);
+      return;
+    }
+
+    const feedbackRef = collection(db, 'portfolios', PORTFOLIO_DOC_ID, 'feedback');
+    const feedbackQuery = query(feedbackRef, orderBy('createdAt', 'desc'));
+
+    const unsubscribe = onSnapshot(
+      feedbackQuery,
+      (snapshot) => {
+        const items = snapshot.docs.map((feedbackDoc) => {
+          const payload = feedbackDoc.data() as {
+            name?: string;
+            email?: string;
+            thoughts?: string;
+            createdAt?: { toDate: () => Date };
+          };
+
+          return {
+            id: feedbackDoc.id,
+            name: payload.name ?? '',
+            email: payload.email ?? '',
+            thoughts: payload.thoughts ?? '',
+            createdAt: payload.createdAt ? payload.createdAt.toDate().getTime() : null,
+          };
+        });
+        setFeedbackItems(items);
+      },
+      (err) => {
+        console.error('Failed to load feedback:', err);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [isLoggedIn]);
 
   const savePortfolio = (data: PortfolioData) => {
     const normalized = normalizePortfolio(data);
@@ -269,6 +366,7 @@ const App: React.FC = () => {
   const createPost = (sectionId: string) => {
     const newPost: Post = {
       id: Date.now().toString(),
+      title: newPostTitle.trim(),
       content: newPostContent,
       media: newPostMedia,
       timestamp: Date.now(),
@@ -282,6 +380,7 @@ const App: React.FC = () => {
     });
 
     savePortfolio({ ...portfolio, sections: updatedSections });
+    setNewPostTitle('');
     setNewPostContent('');
     setNewPostMedia([]);
     setActivePostModal(null);
@@ -290,6 +389,7 @@ const App: React.FC = () => {
   const updatePost = (sectionId: string, postId: string) => {
     const updatedPost: Post = {
       ...editingPost!.post,
+      title: newPostTitle.trim(),
       content: newPostContent,
       media: newPostMedia,
     };
@@ -304,6 +404,7 @@ const App: React.FC = () => {
     savePortfolio({ ...portfolio, sections: updatedSections });
     setEditingPost(null);
     setActivePostModal(null);
+    setNewPostTitle('');
     setNewPostContent('');
     setNewPostMedia([]);
   };
@@ -338,6 +439,36 @@ const App: React.FC = () => {
         getDownloadURL(uploadTask.snapshot.ref).then(resolve).catch(reject);
       });
     });
+  };
+
+  const submitFeedback = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const name = feedbackForm.name.trim();
+    const email = feedbackForm.email.trim();
+    const thoughts = feedbackForm.thoughts.trim();
+
+    if (!name || !email || !thoughts) {
+      alert('Please fill all fields.');
+      return;
+    }
+
+    try {
+      setIsSubmittingFeedback(true);
+      await addDoc(collection(db, 'portfolios', PORTFOLIO_DOC_ID, 'feedback'), {
+        name,
+        email,
+        thoughts,
+        createdAt: serverTimestamp(),
+      });
+      setFeedbackForm({ name: '', email: '', thoughts: '' });
+      setShowFeedbackModal(false);
+      alert('Thanks! Your feedback has been submitted.');
+    } catch (err) {
+      console.error('Failed to submit feedback:', err);
+      alert('Could not submit feedback. Please try again.');
+    } finally {
+      setIsSubmittingFeedback(false);
+    }
   };
 
   return (
@@ -375,6 +506,12 @@ const App: React.FC = () => {
                   className="hidden md:flex items-center gap-2 px-4 py-2 bg-white text-pink-500 hover:bg-pink-50 border border-pink-200 rounded-lg transition-all text-sm font-medium shadow-sm"
                 >
                   <GripVertical className="w-4 h-4" /> Rearrange Sections
+                </button>
+                <button
+                  onClick={() => setShowAdminFeedbackModal(true)}
+                  className="hidden md:flex items-center gap-2 px-4 py-2 bg-white text-pink-500 hover:bg-pink-50 border border-pink-200 rounded-lg transition-all text-sm font-medium shadow-sm"
+                >
+                  <Mail className="w-4 h-4" /> Feedback ({feedbackItems.length})
                 </button>
                 <button
                   onClick={() => setIsLoggedIn(false)}
@@ -483,7 +620,13 @@ const App: React.FC = () => {
               {isLoggedIn && (
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => { setEditingPost(null); setActivePostModal(section.id); }}
+                    onClick={() => {
+                      setEditingPost(null);
+                      setNewPostTitle('');
+                      setNewPostContent('');
+                      setNewPostMedia([]);
+                      setActivePostModal(section.id);
+                    }}
                     className="flex items-center gap-2 px-4 py-2 bg-white text-pink-500 hover:bg-pink-50 border border-pink-200 rounded-lg transition-all font-medium shadow-sm"
                   >
                     <Plus className="w-4 h-4" /> Add Post
@@ -589,9 +732,16 @@ const App: React.FC = () => {
                       )}
 
                       <div className="p-4 flex-grow">
-                        <p className="text-gray-700 text-sm whitespace-pre-wrap line-clamp-4 leading-relaxed">
-                          {post.content}
-                        </p>
+                        {post.title && (
+                          <h3
+                            className="text-base font-bold text-gray-800 leading-snug mb-2 line-clamp-2"
+                            dangerouslySetInnerHTML={{ __html: getFormattedHtml(post.title) }}
+                          />
+                        )}
+                        <div
+                          className="text-gray-700 text-sm whitespace-pre-wrap line-clamp-4 leading-relaxed"
+                          dangerouslySetInnerHTML={{ __html: getFormattedHtml(post.content) }}
+                        />
                       </div>
                       
                       <div className="px-4 py-2 bg-pink-50/50 text-[10px] text-pink-300 font-semibold tracking-wider uppercase">
@@ -605,6 +755,13 @@ const App: React.FC = () => {
           </section>
         ))}
       </main>
+
+      <button
+        onClick={() => setShowFeedbackModal(true)}
+        className="fixed bottom-6 right-6 z-[95] px-5 py-3 bg-pink-500 hover:bg-pink-600 text-white font-semibold rounded-full shadow-xl shadow-pink-200 transition-all"
+      >
+        Leave your thoughts
+      </button>
 
       {/* MODALS */}
       
@@ -713,6 +870,111 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {/* Feedback Modal (Public) */}
+      {showFeedbackModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-white rounded-2xl p-6 shadow-2xl border border-pink-100">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-gray-800">Leave your thoughts</h3>
+              <button
+                onClick={() => setShowFeedbackModal(false)}
+                className="p-2 text-gray-400 hover:text-pink-500 hover:bg-pink-50 rounded-lg transition-all"
+                aria-label="Close feedback modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={submitFeedback} className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</label>
+                <input
+                  type="text"
+                  required
+                  value={feedbackForm.name}
+                  onChange={(e) => setFeedbackForm((prev) => ({ ...prev, name: e.target.value }))}
+                  className="w-full mt-1 px-4 py-2 border border-pink-100 rounded-xl outline-none focus:ring-2 focus:ring-pink-200"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Email</label>
+                <input
+                  type="email"
+                  required
+                  value={feedbackForm.email}
+                  onChange={(e) => setFeedbackForm((prev) => ({ ...prev, email: e.target.value }))}
+                  className="w-full mt-1 px-4 py-2 border border-pink-100 rounded-xl outline-none focus:ring-2 focus:ring-pink-200"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Thoughts</label>
+                <textarea
+                  required
+                  value={feedbackForm.thoughts}
+                  onChange={(e) => setFeedbackForm((prev) => ({ ...prev, thoughts: e.target.value }))}
+                  className="w-full mt-1 px-4 py-2 border border-pink-100 rounded-xl outline-none focus:ring-2 focus:ring-pink-200 min-h-[120px] resize-none"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="submit"
+                  disabled={isSubmittingFeedback}
+                  className="flex-grow py-3 bg-pink-500 text-white font-bold rounded-xl shadow-lg shadow-pink-100 hover:bg-pink-600 transition-all disabled:opacity-60"
+                >
+                  {isSubmittingFeedback ? 'Submitting...' : 'Submit'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowFeedbackModal(false)}
+                  className="px-6 py-3 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Feedback Modal (Admin Only) */}
+      {isLoggedIn && showAdminFeedbackModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-white rounded-2xl p-6 shadow-2xl border border-pink-100">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-gray-800">User Feedback</h3>
+              <button
+                onClick={() => setShowAdminFeedbackModal(false)}
+                className="p-2 text-gray-400 hover:text-pink-500 hover:bg-pink-50 rounded-lg transition-all"
+                aria-label="Close admin feedback modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {feedbackItems.length === 0 ? (
+              <div className="py-10 text-center bg-pink-50/40 border border-dashed border-pink-100 rounded-xl">
+                <p className="text-pink-300 italic">No feedback yet.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {feedbackItems.map((item) => (
+                  <div key={item.id} className="p-4 border border-pink-100 rounded-xl bg-white shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-gray-800">{item.name}</p>
+                      <p className="text-xs text-gray-400">
+                        {item.createdAt
+                          ? new Date(item.createdAt).toLocaleString()
+                          : 'Just now'}
+                      </p>
+                    </div>
+                    <p className="text-xs text-pink-500 mt-1">{item.email}</p>
+                    <p className="text-sm text-gray-700 mt-3 whitespace-pre-wrap leading-relaxed">{item.thoughts}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Reorder Sections Modal */}
       {showReorderModal && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
@@ -767,12 +1029,77 @@ const App: React.FC = () => {
             <h3 className="text-xl font-bold text-gray-800 mb-4">{editingPost ? 'Edit Post' : `Add to ${portfolio.sections.find(s => s.id === activePostModal)?.title}`}</h3>
             
             <div className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Post Title</label>
+                <input
+                  ref={postTitleInputRef}
+                  type="text"
+                  placeholder="Add a title for this post"
+                  className="w-full mt-1 px-4 py-2 border border-pink-100 rounded-xl outline-none focus:ring-2 focus:ring-pink-200"
+                  value={newPostTitle}
+                  onChange={(e) => setNewPostTitle(e.target.value)}
+                />
+                <div className="flex items-center gap-2 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => applyFormat('title', '**')}
+                    className="px-3 py-1.5 text-sm border border-pink-200 rounded-lg hover:bg-pink-50 font-bold"
+                    title="Bold"
+                  >
+                    B
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyFormat('title', '*')}
+                    className="px-3 py-1.5 text-sm border border-pink-200 rounded-lg hover:bg-pink-50 italic"
+                    title="Italic"
+                  >
+                    I
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyFormat('title', '__')}
+                    className="px-3 py-1.5 text-sm border border-pink-200 rounded-lg hover:bg-pink-50 underline"
+                    title="Underline"
+                  >
+                    U
+                  </button>
+                </div>
+              </div>
+
               <textarea
+                ref={postContentInputRef}
                 placeholder="What would you like to share?"
                 className="w-full p-4 border border-pink-50 bg-pink-50/20 rounded-xl outline-none focus:ring-2 focus:ring-pink-100 min-h-[150px] resize-none"
                 value={newPostContent}
                 onChange={(e) => setNewPostContent(e.target.value)}
               />
+              <div className="flex items-center gap-2 -mt-2">
+                <button
+                  type="button"
+                  onClick={() => applyFormat('content', '**')}
+                  className="px-3 py-1.5 text-sm border border-pink-200 rounded-lg hover:bg-pink-50 font-bold"
+                  title="Bold"
+                >
+                  B
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyFormat('content', '*')}
+                  className="px-3 py-1.5 text-sm border border-pink-200 rounded-lg hover:bg-pink-50 italic"
+                  title="Italic"
+                >
+                  I
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyFormat('content', '__')}
+                  className="px-3 py-1.5 text-sm border border-pink-200 rounded-lg hover:bg-pink-50 underline"
+                  title="Underline"
+                >
+                  U
+                </button>
+              </div>
 
               <div className="grid grid-cols-4 gap-3">
                 {newPostMedia.map((media) => (
@@ -871,12 +1198,12 @@ const App: React.FC = () => {
             <div className="flex gap-3 mt-8">
               <button 
                 onClick={() => editingPost ? updatePost(editingPost.sectionId, editingPost.post.id) : createPost(activePostModal!)} 
-                disabled={!newPostContent && newPostMedia.length === 0}
+                disabled={!newPostTitle && !newPostContent && newPostMedia.length === 0}
                 className="flex-grow py-3 bg-pink-500 text-white font-bold rounded-xl shadow-lg shadow-pink-100 hover:bg-pink-600 transition-all disabled:opacity-50"
               >
                 {editingPost ? 'Update Post' : 'Post Content'}
               </button>
-              <button onClick={() => { setActivePostModal(null); setEditingPost(null); setNewPostMedia([]); setNewPostContent(''); }} className="px-6 py-3 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50">Discard</button>
+              <button onClick={() => { setActivePostModal(null); setEditingPost(null); setNewPostTitle(''); setNewPostMedia([]); setNewPostContent(''); }} className="px-6 py-3 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50">Discard</button>
             </div>
           </div>
         </div>
@@ -936,9 +1263,16 @@ const App: React.FC = () => {
                 </div>
               ))}
 
-              <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">
-                {expandedPost.post.content}
-              </p>
+              {expandedPost.post.title && (
+                <h3
+                  className="text-xl font-bold text-gray-800 leading-snug"
+                  dangerouslySetInnerHTML={{ __html: getFormattedHtml(expandedPost.post.title) }}
+                />
+              )}
+              <div
+                className="text-gray-700 whitespace-pre-wrap leading-relaxed"
+                dangerouslySetInnerHTML={{ __html: getFormattedHtml(expandedPost.post.content) }}
+              />
             </div>
           </div>
         </div>

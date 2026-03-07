@@ -8,6 +8,7 @@ export interface MediaItem {
 
 export interface Post {
   id: string;
+  title?: string;
   content: string;
   media: MediaItem[];
   timestamp: number;
