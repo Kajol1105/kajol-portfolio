@@ -119,6 +119,8 @@ const App: React.FC = () => {
   const [showSectionModal, setShowSectionModal] = useState(false);
   const [showReorderModal, setShowReorderModal] = useState(false);
   const [draggingSectionId, setDraggingSectionId] = useState<string | null>(null);
+  const [reorderPostsSectionId, setReorderPostsSectionId] = useState<string | null>(null);
+  const [draggingPostId, setDraggingPostId] = useState<string | null>(null);
   const [newSectionTitle, setNewSectionTitle] = useState('');
   const [activePostModal, setActivePostModal] = useState<string | null>(null); // sectionId
   const [editingPost, setEditingPost] = useState<{post: Post, sectionId: string} | null>(null);
@@ -344,6 +346,25 @@ const App: React.FC = () => {
     const updatedSections = [...portfolio.sections];
     const [movedSection] = updatedSections.splice(fromIndex, 1);
     updatedSections.splice(toIndex, 0, movedSection);
+
+    savePortfolio({ ...portfolio, sections: updatedSections });
+  };
+
+  const reorderPosts = (sectionId: string, draggedPostId: string, targetPostId: string) => {
+    if (draggedPostId === targetPostId) return;
+
+    const updatedSections = portfolio.sections.map((section) => {
+      if (section.id !== sectionId) return section;
+
+      const fromIndex = section.posts.findIndex((post) => post.id === draggedPostId);
+      const toIndex = section.posts.findIndex((post) => post.id === targetPostId);
+      if (fromIndex === -1 || toIndex === -1) return section;
+
+      const updatedPosts = [...section.posts];
+      const [movedPost] = updatedPosts.splice(fromIndex, 1);
+      updatedPosts.splice(toIndex, 0, movedPost);
+      return { ...section, posts: updatedPosts };
+    });
 
     savePortfolio({ ...portfolio, sections: updatedSections });
   };
@@ -630,6 +651,12 @@ const App: React.FC = () => {
                     className="flex items-center gap-2 px-4 py-2 bg-white text-pink-500 hover:bg-pink-50 border border-pink-200 rounded-lg transition-all font-medium shadow-sm"
                   >
                     <Plus className="w-4 h-4" /> Add Post
+                  </button>
+                  <button
+                    onClick={() => setReorderPostsSectionId(section.id)}
+                    className="flex items-center gap-2 px-3 py-2 bg-white text-pink-500 hover:bg-pink-50 border border-pink-200 rounded-lg transition-all font-medium shadow-sm"
+                  >
+                    <GripVertical className="w-4 h-4" /> Rearrange Posts
                   </button>
                   <button
                     onClick={() => deleteAllPostsInSection(section.id)}
@@ -1204,6 +1231,62 @@ const App: React.FC = () => {
                 {editingPost ? 'Update Post' : 'Post Content'}
               </button>
               <button onClick={() => { setActivePostModal(null); setEditingPost(null); setNewPostTitle(''); setNewPostMedia([]); setNewPostContent(''); }} className="px-6 py-3 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50">Discard</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reorder Posts Modal */}
+      {reorderPostsSectionId && (
+        <div className="fixed inset-0 z-[75] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-white rounded-2xl p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
+            <h3 className="text-xl font-bold text-gray-800">Rearrange Posts</h3>
+            <p className="text-sm text-gray-500 mt-1 mb-4">
+              {portfolio.sections.find((s) => s.id === reorderPostsSectionId)?.title}
+            </p>
+            <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+              {(portfolio.sections.find((s) => s.id === reorderPostsSectionId)?.posts ?? []).length === 0 ? (
+                <p className="text-sm text-gray-400 py-4 text-center border border-dashed rounded-xl">No posts to rearrange.</p>
+              ) : (
+                (portfolio.sections.find((s) => s.id === reorderPostsSectionId)?.posts ?? []).map((post) => (
+                  <div
+                    key={post.id}
+                    draggable
+                    onDragStart={() => setDraggingPostId(post.id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => {
+                      if (draggingPostId) {
+                        reorderPosts(reorderPostsSectionId, draggingPostId, post.id);
+                      }
+                      setDraggingPostId(null);
+                    }}
+                    onDragEnd={() => setDraggingPostId(null)}
+                    className={`flex items-start gap-3 p-3 rounded-xl border transition-colors cursor-move ${
+                      draggingPostId === post.id
+                        ? 'bg-pink-50 border-pink-300'
+                        : 'bg-white border-pink-100 hover:bg-pink-50/50'
+                    }`}
+                  >
+                    <GripVertical className="w-4 h-4 text-pink-400 mt-0.5" />
+                    <div className="min-w-0">
+                      {post.title && (
+                        <p className="text-sm font-semibold text-gray-800 truncate">{post.title}</p>
+                      )}
+                      <p className="text-xs text-gray-500 truncate">
+                        {post.content || (post.media.length > 0 ? `${post.media.length} media item(s)` : 'Untitled post')}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                onClick={() => setReorderPostsSectionId(null)}
+                className="px-6 py-2 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50"
+              >
+                Done
+              </button>
             </div>
           </div>
         </div>
