@@ -14,6 +14,10 @@ const DEFAULT_BIO = 'I am a Computer Engineering student with a passion for buil
 const DEFAULT_COLLEGE = 'SCOE';
 const PORTFOLIO_DOC_ID = 'portfoliokajol';
 const RESUME_SECTION_TITLE = 'Resume';
+const INTERNSHIP_SECTION_TITLE = 'Internship';
+const INTERNSHIP_SECTION_ALIASES = new Set(['internship', 'intership']);
+const DREAMVENTX_OFFER_LETTER_URL = '/DREAMVENTX OFFER LETTER.pdf';
+const DREAMVENTX_OFFER_LETTER_NAME = 'DREAMVENTX OFFER LETTER.pdf';
 
 const INITIAL_DATA: PortfolioData = {
   profile: {
@@ -69,12 +73,12 @@ const ensureResumeSection = (sections: Section[]): Section[] => {
     id: 'resume-media-1',
     type: 'pdf',
     url: resumePdf,
-    name: 'resume1.pdf',
+    name: 'RESUME.pdf',
   };
 
   const resumePost: Post = {
     id: 'resume-post-1',
-    content: 'resume1.pdf',
+    content: 'RESUME.pdf',
     media: [resumeMedia],
     timestamp: Date.now(),
   };
@@ -97,13 +101,64 @@ const ensureResumeSection = (sections: Section[]): Section[] => {
   const updatedSections = [...sections];
   const existingResume = updatedSections[resumeIndex];
   const hasResumePdf = existingResume.posts.some((post) =>
-    post.media.some((media) => media.type === 'pdf' && (media.name === 'resume1.pdf' || media.url === resumePdf))
+    post.media.some((media) => media.type === 'pdf' && (media.name === 'RESUME.pdf' || media.url === resumePdf))
   );
 
   if (!hasResumePdf) {
     updatedSections[resumeIndex] = {
       ...existingResume,
       posts: [resumePost, ...existingResume.posts],
+    };
+  }
+
+  return updatedSections;
+};
+
+const ensureInternshipSection = (sections: Section[]): Section[] => {
+  const offerLetterMedia: MediaItem = {
+    id: 'dreamventx-offer-letter-media-1',
+    type: 'pdf',
+    url: DREAMVENTX_OFFER_LETTER_URL,
+    name: DREAMVENTX_OFFER_LETTER_NAME,
+  };
+
+  const offerLetterPost: Post = {
+    id: 'dreamventx-offer-letter-post-1',
+    title: 'Dreamventx Offer Letter',
+    content: 'Offer Letter',
+    media: [offerLetterMedia],
+    timestamp: Date.now(),
+  };
+
+  const internshipIndex = sections.findIndex((section) =>
+    INTERNSHIP_SECTION_ALIASES.has(section.title.trim().toLowerCase())
+  );
+
+  if (internshipIndex === -1) {
+    return [
+      ...sections,
+      {
+        id: 'internship-section-1',
+        title: INTERNSHIP_SECTION_TITLE,
+        posts: [offerLetterPost],
+      },
+    ];
+  }
+
+  const updatedSections = [...sections];
+  const existingInternship = updatedSections[internshipIndex];
+  const hasOfferLetter = existingInternship.posts.some((post) =>
+    post.media.some(
+      (media) =>
+        media.type === 'pdf' &&
+        (media.name === DREAMVENTX_OFFER_LETTER_NAME || media.url === DREAMVENTX_OFFER_LETTER_URL)
+    )
+  );
+
+  if (!hasOfferLetter) {
+    updatedSections[internshipIndex] = {
+      ...existingInternship,
+      posts: [offerLetterPost, ...existingInternship.posts],
     };
   }
 
@@ -151,6 +206,31 @@ const App: React.FC = () => {
     }
   }, [editingPost]);
 
+  const renderPdfPreview = (media: MediaItem, compact = false) => (
+    <div className={`relative w-full overflow-hidden bg-gradient-to-br from-pink-50 via-white to-rose-50 ${compact ? 'h-full' : 'min-h-[420px]'}`}>
+      <iframe
+        src={`${media.url}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+        title={media.name || 'PDF preview'}
+        className="min-h-[240px] h-full w-full border-0 pointer-events-none"
+      />
+      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-3 bg-gradient-to-t from-white via-white/95 to-transparent px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2 text-pink-600">
+          <FileText className="w-4 h-4 shrink-0" />
+          <span className="truncate text-xs font-semibold">{media.name || 'PDF file'}</span>
+        </div>
+        <a
+          href={media.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(event) => event.stopPropagation()}
+          className="shrink-0 rounded-lg bg-pink-500 px-3 py-2 text-xs font-semibold text-white transition-all hover:bg-pink-600"
+        >
+          Open PDF
+        </a>
+      </div>
+    </div>
+  );
+
   const escapeHtml = (input: string) =>
     input
       .replace(/&/g, '&amp;')
@@ -191,7 +271,7 @@ const App: React.FC = () => {
 
   const normalizePortfolio = (data: PortfolioData): PortfolioData => ({
     ...data,
-    sections: ensureResumeSection(data.sections),
+    sections: ensureInternshipSection(ensureResumeSection(data.sections)),
     profile: {
       ...data.profile,
       profilePicture: profilePic,
@@ -744,12 +824,7 @@ const App: React.FC = () => {
                           {post.media[0].type === 'video' && (
                             <video src={post.media[0].url} className="w-full h-full object-cover" controls />
                           )}
-                          {post.media[0].type === 'pdf' && (
-                            <div className="flex flex-col items-center justify-center h-full text-pink-400">
-                              <FileText className="w-12 h-12" />
-                              <span className="text-xs mt-2 px-2 text-center truncate w-full">{post.media[0].name}</span>
-                            </div>
-                          )}
+                          {post.media[0].type === 'pdf' && renderPdfPreview(post.media[0], true)}
                           {post.media.length > 1 && (
                             <div className="absolute bottom-2 right-2 px-2 py-1 bg-black/50 text-white text-[10px] rounded-md backdrop-blur-sm">
                               +{post.media.length - 1} more
@@ -1327,22 +1402,7 @@ const App: React.FC = () => {
                   {media.type === 'video' && (
                     <video src={media.url} className="w-full max-h-[420px] bg-black" controls />
                   )}
-                  {media.type === 'pdf' && (
-                    <div className="p-6 flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3 text-pink-500">
-                        <FileText className="w-6 h-6" />
-                        <span className="text-sm text-gray-700 break-all">{media.name || 'PDF file'}</span>
-                      </div>
-                      <a
-                        href={media.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-2 bg-pink-500 text-white text-xs font-semibold rounded-lg hover:bg-pink-600 transition-all"
-                      >
-                        Open PDF
-                      </a>
-                    </div>
-                  )}
+                  {media.type === 'pdf' && renderPdfPreview(media)}
                 </div>
               ))}
 
