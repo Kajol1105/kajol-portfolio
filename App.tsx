@@ -6,7 +6,8 @@ import { Lock, Plus, LogOut, Mail, Linkedin, Instagram, GraduationCap, Trash2, E
 import SakuraBackground from './components/SakuraBackground';
 import { PortfolioData, Section, Post, MediaItem, ProfileData } from './types';
 import profilePic from './profile.jpg';
-import resumePdf from './resume1.pdf';
+import resumePdf from './RESUME.pdf';
+import atsResumePdf from './ATS RESUME.pdf';
 import { db, storage } from './firebase';
 
 const FIXED_DEGREE = 'Bachelor of Engineering in Computer Engineering';
@@ -58,7 +59,7 @@ const INITIAL_DATA: PortfolioData = {
   ]
 };
 
-const SECRET_CODE = "DAZAI4teru";
+const SECRET_CODE = "dazAI4teru";
 
 interface FeedbackItem {
   id: string;
@@ -83,6 +84,33 @@ const ensureResumeSection = (sections: Section[]): Section[] => {
     timestamp: Date.now(),
   };
 
+  const atsResumeMedia: MediaItem = {
+    id: 'ats-resume-media-1',
+    type: 'pdf',
+    url: atsResumePdf,
+    name: 'ATS RESUME.pdf',
+  };
+
+  const atsResumePost: Post = {
+    id: 'ats-resume-post-1',
+    content: 'ATS RESUME.pdf',
+    media: [atsResumeMedia],
+    timestamp: Date.now(),
+  };
+
+  const requiredResumePosts = [resumePost, atsResumePost];
+
+  const findResumePostIndex = (posts: Post[], requiredPost: Post) =>
+    posts.findIndex((post) =>
+      post.media.some(
+        (media) =>
+          media.type === 'pdf' &&
+          requiredPost.media.some(
+            (requiredMedia) => media.name === requiredMedia.name || media.url === requiredMedia.url
+          )
+      )
+    );
+
   const resumeIndex = sections.findIndex(
     (section) => section.title.trim().toLowerCase() === RESUME_SECTION_TITLE.toLowerCase()
   );
@@ -93,21 +121,29 @@ const ensureResumeSection = (sections: Section[]): Section[] => {
       {
         id: 'resume-section-1',
         title: RESUME_SECTION_TITLE,
-        posts: [resumePost],
+        posts: requiredResumePosts,
       },
     ];
   }
 
   const updatedSections = [...sections];
   const existingResume = updatedSections[resumeIndex];
-  const hasResumePdf = existingResume.posts.some((post) =>
-    post.media.some((media) => media.type === 'pdf' && (media.name === 'RESUME.pdf' || media.url === resumePdf))
-  );
+  const nextPosts = [...existingResume.posts];
 
-  if (!hasResumePdf) {
+  requiredResumePosts.forEach((requiredPost, index) => {
+    if (findResumePostIndex(nextPosts, requiredPost) !== -1) return;
+
+    const previousRequiredPost = requiredResumePosts[index - 1];
+    const previousPostIndex = previousRequiredPost ? findResumePostIndex(nextPosts, previousRequiredPost) : -1;
+    const insertIndex = previousPostIndex === -1 ? 0 : previousPostIndex + 1;
+    nextPosts.splice(insertIndex, 0, requiredPost);
+  });
+
+  if (nextPosts.length !== existingResume.posts.length) {
     updatedSections[resumeIndex] = {
       ...existingResume,
-      posts: [resumePost, ...existingResume.posts],
+      posts: nextPosts,
+
     };
   }
 
